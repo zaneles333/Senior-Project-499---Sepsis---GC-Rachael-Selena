@@ -483,7 +483,101 @@ vitals_features = [heart_features, sys_bp_features, dias_bp_features, MAP_featur
 vitals_feature_table = reduce(
     lambda left, right: pd.merge(left, right, on='hadm_id', how='outer'),  vitals_features)
 
-print(vitals_feature_table)
+# print(vitals_feature_table)
+list(vitals_feature_table.columns)
+
+# calculating MAP if empty, and if blood pressure is given
+
+# vitals_feature_table1 = vitals_feature_table.copy()
+
+# timebin 1
+map_cols = [c for c in vitals_feature_table.columns if "MAP_bin1_mean" in c]
+sbp_cols = [c for c in vitals_feature_table.columns if "sys_bp_bin1_mean" in c]
+dbp_cols = [c for c in vitals_feature_table.columns if "dias_bp_bin1_mean" in c]
+
+print(map_cols, sbp_cols, dbp_cols)
+
+for map_col, sbp_col, dbp_col in zip(map_cols, sbp_cols, dbp_cols):
+    print(map_col, sbp_col, dbp_col)
+
+    mask = vitals_feature_table[map_col].isna() & \
+           vitals_feature_table[sbp_col].notna() & \
+           vitals_feature_table[dbp_col].notna()
+
+    vitals_feature_table.loc[mask, map_col] = (
+        vitals_feature_table.loc[mask, sbp_col] +
+        2 * vitals_feature_table.loc[mask, dbp_col]
+    ) / 3
+
+
+# time bin2
+
+map_cols = [c for c in vitals_feature_table.columns if "MAP_bin2_mean" in c]
+sbp_cols = [c for c in vitals_feature_table.columns if "sys_bp_bin2_mean" in c]
+dbp_cols = [c for c in vitals_feature_table.columns if "dias_bp_bin2_mean" in c]
+
+for map_col, sbp_col, dbp_col in zip(map_cols, sbp_cols, dbp_cols):
+
+    mask = vitals_feature_table[map_col].isna() & \
+           vitals_feature_table[sbp_col].notna() & \
+           vitals_feature_table[dbp_col].notna()
+
+    vitals_feature_table.loc[mask, map_col] = (
+        vitals_feature_table.loc[mask, sbp_col] +
+        2 * vitals_feature_table.loc[mask, dbp_col]
+    ) / 3
+
+
+# time bin 3
+
+map_cols = [c for c in vitals_feature_table.columns if "MAP_bin3_mean" in c]
+sbp_cols = [c for c in vitals_feature_table.columns if "sys_bp_bin3_mean" in c]
+dbp_cols = [c for c in vitals_feature_table.columns if "dias_bp_bin3_mean" in c]
+
+for map_col, sbp_col, dbp_col in zip(map_cols, sbp_cols, dbp_cols):
+
+    mask = vitals_feature_table[map_col].isna() & \
+           vitals_feature_table[sbp_col].notna() & \
+           vitals_feature_table[dbp_col].notna()
+
+    vitals_feature_table.loc[mask, map_col] = (
+        vitals_feature_table.loc[mask, sbp_col] +
+        2 * vitals_feature_table.loc[mask, dbp_col]
+    ) / 3
+
+
+# change in MAP
+
+map1_cols = [c for c in vitals_feature_table.columns if "MAP_bin1_mean" in c]
+map2_cols = [c for c in vitals_feature_table.columns if "MAP_bin2_mean" in c]
+map3_cols = [c for c in vitals_feature_table.columns if "MAP_bin3_mean" in c]
+
+dmap2_cols = [c for c in vitals_feature_table.columns if "change_MAP_bin2_mean" in c]
+dmap3_cols = [c for c in vitals_feature_table.columns if "change_MAP_bin3_mean" in c]
+
+for map1_col, map2_col, map3_col, dmap2_col, dmap3_col in zip(map1_cols, map2_cols, map3_cols, dmap2_cols, dmap3_cols):
+
+    # change between time bins 1 and 2
+    mask2 = vitals_feature_table[dmap2_col].isna() & \
+           vitals_feature_table[map1_col].notna() & \
+           vitals_feature_table[map2_col].notna()
+
+    # change between time bins 2 and 3
+    mask3 = vitals_feature_table[dmap3_col].isna() & \
+           vitals_feature_table[map2_col].notna() & \
+           vitals_feature_table[map3_col].notna()
+
+    vitals_feature_table.loc[mask2, dmap2_col] = (
+        vitals_feature_table.loc[mask, map2_col] -
+        vitals_feature_table.loc[mask, map1_col])
+
+    vitals_feature_table.loc[mask3, dmap3_col] = (
+        vitals_feature_table.loc[mask, map3_col] -
+        vitals_feature_table.loc[mask, map2_col])
+
+
+# print(vitals_feature_table['MAP_bin1_mean'])
+list(vitals_feature_table.columns)
 
 # finding itemids for lab
 
@@ -1045,7 +1139,7 @@ fluids = d_items[
 fluids_ids = fluids[['itemid', 'label', 'category', 'linksto']].sort_values('label')
 #print(fluids_ids)
 
-# Making input output tables across all time bins
+# Making input tables across all time bins
 
 # loading both INPUTEVENTS_MV and INPUTEVENTS_CV - just looking at IV fluid inputs
 
@@ -1109,10 +1203,41 @@ print(input_features_table)
 
 # Finding output ids for
 
+# OUTPUT
+output_keywords = ['urine out']
+outputs_ids = find_itemids_by_label(d_items, output_keywords, fuzzy=True)
+print(outputs_ids)
+# lactate_ids1 = [50813]
 
-# Outputs feature table
+# loading output values
 
-outputs = load_filtered_csv('OUTPUTEVENTS.csv', usecols=['itemid','label','fluid','category'])
+# outputs = load_temporal_table(
+#     filename='OUTPUTEVENTS.csv',
+#     usecols=['hadm_id','charttime','itemid','valueuom'],
+#     time_col='charttime',
+#     value_col='value',
+#     item_col='itemid',
+#     itemids=outputs_ids
+# )
+
+# need to find sum across time bin
+cols_out = ['hadm_id', 'itemid', 'charttime', 'value']
+outputs = pd.read_csv(
+    f"{datapath}/OUTPUTEVENTS.csv", usecols=cols_out, header=1,low_memory=False)
+
+outputs_features_table = summarize_over_window(
+    df=outputs,
+    ref_times=ref_times,
+    hadm_col='hadm_id',
+    time_col='charttime',
+    value_col='value',
+    BIN_HOURS=N_HOURS,       # each bin = 2 hr
+    N_BIN=N_BINS,          # 3 bins = total 6 hr window
+    AGG_FUN=('sum',), # total fluid input volume
+    prefix='outputs',
+    fill_missing=True
+)
+print(outputs_features_table)
 
 # COMBINING ALL INTO SINGLE
 
@@ -1121,15 +1246,38 @@ vitals_feature_table['hadm_id'] = pd.to_numeric(vitals_feature_table['hadm_id'],
 labs_feature_table['hadm_id'] = pd.to_numeric(labs_feature_table['hadm_id'], errors='coerce').astype('Int64')
 micro_features_table['hadm_id'] = pd.to_numeric(micro_features_table['hadm_id'], errors='coerce').astype('Int64')
 input_features_table['hadm_id'] = pd.to_numeric(input_features_table['hadm_id'], errors='coerce').astype('Int64')
+outputs_features_table['hadm_id'] = pd.to_numeric(outputs_features_table['hadm_id'], errors='coerce').astype('Int64')
 
 
-all_features = [static_features_table, vitals_feature_table, labs_feature_table, micro_features_table, input_features_table]
+all_features = [static_features_table, vitals_feature_table, labs_feature_table, micro_features_table, input_features_table, outputs_features_table]
 
 all_features_table = reduce(
     lambda left, right: pd.merge(left, right, on='hadm_id', how='outer'),  all_features)
 
-print(all_features_table)
+#print(all_features_table)
+all_features_table.head()
 
-all_features_table.to_csv(f"{datapath}/all_features_table.csv", index=False)
+#all_features_table.to_csv(f"{datapath}/all_features_table.csv", index=False)
+
+# Embedding the text columns - gender, admission type, ethnicity
+
+import pandas as pd
+
+df = all_features_table.copy()
+
+# Columns to encode
+categorical_cols = ["gender", "ethnicity", "admission_type"]
+
+# Ensure they are hashable (strings)
+for col in categorical_cols:
+    df[col] = df[col].astype(str)
+
+# One-hot encode
+df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=False)
+
+df_encoded.head()
+#print(df_encoded)
+
+df_encoded.to_csv(f"{datapath}/all_features_table_encoded.csv", index=False)
 
 """# New Section"""
