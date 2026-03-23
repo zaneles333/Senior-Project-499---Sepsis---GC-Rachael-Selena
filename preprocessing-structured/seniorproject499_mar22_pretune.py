@@ -1561,7 +1561,12 @@ out = pd.DataFrame({
 
 out.to_csv(f"{datapath}/processed CSVs/train4_small_sepsis_labels.csv", index=False)
 
-"""#Pytorch Neural Network"""
+"""# Setting up Model
+
+---
+
+
+"""
 
 # getting PyTorch
 
@@ -1588,6 +1593,7 @@ import os
 datapath = '/content/drive/MyDrive/25 Fall/BME499 - Senior Capstone/499 Senior Project Group - RaGS/Code/CSV Files/';
 
 file = 'train1_combined_latest_note_1_hadm18hrs.csv'
+# file = 'train1_all_features_table_15hrs.csv'
 path = f"{datapath}processed CSVs/{file}"
 features = pd.read_csv(path);
 
@@ -1596,6 +1602,16 @@ print(features.shape)
 if 'NUM_ANTIBIOTICS' in features.columns:
     features = features.drop(columns=['NUM_ANTIBIOTICS'])
     print("Column 'NUM_ANTIBIOTICS' removed successfully.")
+    print(features.shape)
+
+if 'PROP_RESIST' in features.columns:
+    features = features.drop(columns=['PROP_RESIST'])
+    print("Column 'PROP_RESIST' removed successfully.")
+    print(features.shape)
+
+if 'NUM_ORGANISMS' in features.columns:
+    features = features.drop(columns=['NUM_ORGANISMS'])
+    print("Column 'NUM_ORGANISMS' removed successfully.")
     print(features.shape)
 
 labels = pd.read_csv(f'{datapath}/processed CSVs/set 1/train1_small_sepsis_labels.csv');
@@ -1820,372 +1836,7 @@ test_ds  = TabularDataset(X_test_t,  y_test_t)
 train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
 test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False)
 
-# Attempt 1 for the model
-
-'''
-# ----------------------------
-# 8) Model
-# ----------------------------
-class MLP(nn.Module):
-    def __init__(self, in_dim, hidden=(128, 64), dropout=0.15):
-      # in_dim = num features
-        super().__init__()
-        layers = []
-        prev = in_dim
-        for h in hidden:
-            layers += [nn.Linear(prev, h), nn.ReLU(0.01), nn.Dropout(dropout)]
-            prev = h
-        layers += [nn.Linear(prev, 1)]  # logits
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.net(x)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = MLP(in_dim=X_train_t.shape[1]).to(device)
-
-# Class imbalance handling: pos_weight = Nneg/Npos
-pos = float((y_train == 1).sum())
-neg = float((y_train == 0).sum())
-pos_weight = torch.tensor([neg / max(pos, 1.0)], dtype=torch.float32).to(device)
-criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-'''
-
-'''
-# ----------------------------
-# 9) Train + evaluate
-# ----------------------------
-def eval_model(model, loader):
-    model.eval()
-    all_logits, all_y = [], []
-    with torch.no_grad():
-        for xb, yb in loader:
-            xb = xb.to(device)
-            logits = model(xb).cpu().numpy().reshape(-1)
-            all_logits.append(logits)
-            all_y.append(yb.cpu().numpy().reshape(-1))
-    logits = np.concatenate(all_logits)
-    ytrue  = np.concatenate(all_y).astype(int)
-    probs  = sigmoid(logits)
-    preds  = (probs >= 0.5).astype(int)
-    return logits, ytrue, probs, preds
-
-def train(model, epochs=25):
-    for ep in range(1, epochs + 1):
-        model.train()
-        running = 0.0
-        for xb, yb in train_loader:
-            xb = xb.to(device)
-            yb = yb.to(device)
-
-            optimizer.zero_grad(set_to_none=True)
-            logits = model(xb)
-            loss = criterion(logits, yb)
-            loss.backward()
-            optimizer.step()
-            running += loss.item() * xb.size(0)
-
-        train_loss = running / len(train_ds)
-
-        logits, ytrue, probs, preds = eval_model(model, test_loader)
-        acc, prec, rec, f1, (tp, tn, fp, fn) = precision_recall_f1(ytrue, preds)
-        auroc = roc_auc_score_np(ytrue, probs)
-        auprc = average_precision_score_np(ytrue, probs)
-
-        print(
-            f"Epoch {ep:02d} | train_loss={train_loss:.4f} | "
-            f"acc={acc:.3f} prec={prec:.3f} rec={rec:.3f} f1={f1:.3f} | "
-            f"AUROC={auroc:.3f} AUPRC={auprc:.3f} | "
-            f"TP={tp} TN={tn} FP={fp} FN={fn}"
-        )
-        return logits, ytrue, probs, preds
-'''
-
-'''
-# ----------------------------
-# 10) Final metrics + save artifacts
-# ----------------------------
-
-N_RUNS = 50
-
-accs, precs, recs, f1s = [], [], [], []
-aurocs, auprcs = [], []
-tps, tns, fps, fns = [], [], [], []
-
-for run in range(N_RUNS):
-    print(f"\n===== RUN {run+1}/{N_RUNS} =====")
-
-    # Optional: change seed each run
-    torch.manual_seed(run)
-    np.random.seed(run)
-
-    # ---- Reinitialize model ----
-    model = MLP(in_dim=len(feature_cols))
-    model.to(device)
-
-    # ---- Retrain model ----
-    logits, ytrue, probs, preds = train(model, epochs=25)
-
-    # ---- Evaluate ----
-    logits, ytrue, probs, preds = eval_model(model, test_loader)
-
-    acc, prec, rec, f1, (tp, tn, fp, fn) = precision_recall_f1(ytrue, preds)
-    auroc = roc_auc_score_np(ytrue, probs)
-    auprc = average_precision_score_np(ytrue, probs)
-
-    # Store metrics
-    accs.append(acc)
-    precs.append(prec)
-    recs.append(rec)
-    f1s.append(f1)
-    aurocs.append(auroc)
-    auprcs.append(auprc)
-
-    tps.append(tp)
-    tns.append(tn)
-    fps.append(fp)
-    fns.append(fn)
-
-# ---- Convert to numpy ----
-accs = np.array(accs)
-precs = np.array(precs)
-recs = np.array(recs)
-f1s = np.array(f1s)
-aurocs = np.array(aurocs)
-auprcs = np.array(auprcs)
-
-tps = np.array(tps)
-tns = np.array(tns)
-fps = np.array(fps)
-fns = np.array(fns)
-
-print("\n================ FINAL AVERAGED RESULTS (50 RUNS) ================")
-
-print(f"Accuracy  = {accs.mean():.3f} ± {accs.std():.3f}")
-print(f"Precision = {precs.mean():.3f} ± {precs.std():.3f}")
-print(f"Recall    = {recs.mean():.3f} ± {recs.std():.3f}")
-print(f"F1        = {f1s.mean():.3f} ± {f1s.std():.3f}")
-
-print(f"AUROC     = {aurocs.mean():.3f} ± {aurocs.std():.3f}")
-print(f"AUPRC     = {auprcs.mean():.3f} ± {auprcs.std():.3f}")
-
-print("\nAverage Confusion Matrix Values:")
-print(f"TP={tps.mean():.1f}  TN={tns.mean():.1f}  FP={fps.mean():.1f}  FN={fns.mean():.1f}")
-
-'''
-
-'''
-# graphing distrbution of logits
-
-import matplotlib.pyplot as plt
-
-probs_0 = probs[ytrue == 0]
-print(len(probs_0))
-probs_1 = probs[ytrue == 1]
-print(len(probs_1))
-
-probs_00 = probs[ytrue + preds == 0]
-print(len(probs_00))
-probs_01 = probs[~ytrue + preds == 0]
-print(len(probs_01))
-probs_10 = probs[ytrue + ~preds == 0]
-print(len(probs_10))
-probs_11 = probs[ytrue + preds == 2]
-print(len(probs_11))
-
-x_00 = np.zeros(len(probs_00))
-x_01 = np.zeros(len(probs_01))
-x_10 = np.ones(len(probs_10))
-x_11 = np.ones(len(probs_11))
-
-# yellow = preds of 0, organe = preds of 1
-plt.figure()
-plt.scatter(probs_00, x_00, c="green", alpha=.3)
-plt.scatter(probs_01, x_01, c="orange", alpha=.3)
-plt.scatter(np.mean(probs_0),0,c="black")
-plt.scatter(probs_10, x_10, c="green", alpha=.3)
-plt.scatter(probs_11, x_11, c="orange", alpha=.3)
-plt.scatter(np.mean(probs_1),1,c="black")
-plt.xlabel("Sigmoid prob value")
-plt.ylabel("Sepsis Label")
-plt.title("Distribution of final layer prob")
-ax = plt.gca()
-ax.set_xlim([0, 1])
-plt.show()
-'''
-
-'''
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-
-model.eval()
-
-with torch.no_grad():
-    logits = model(X_test_t.to(next(model.parameters()).device)).cpu().numpy().reshape(-1)
-
-ytrue = y_test_t.cpu().numpy().reshape(-1)
-probs = 1 / (1 + np.exp(-logits))   # sigmoid
-
-# ---- Compute ROC manually ----
-order = np.argsort(-probs)
-y_sorted = ytrue[order]
-
-tp = np.cumsum(y_sorted == 1)
-fp = np.cumsum(y_sorted == 0)
-
-n_pos = (ytrue == 1).sum()
-n_neg = (ytrue == 0).sum()
-
-tpr = tp / n_pos
-fpr = fp / n_neg
-
-tpr = np.concatenate([[0], tpr])
-fpr = np.concatenate([[0], fpr])
-
-auroc = np.trapz(tpr, fpr)
-
-# ---- Plot (no colors specified per rules) ----
-plt.figure()
-plt.plot(fpr, tpr)
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title(f"ROC Curve (AUROC = {auroc:.3f})")
-plt.show()
-'''
-
-# Attempt 2 for the model
-
-'''
-import torch.nn as nn
-
-class SepsisMLP(nn.Module):
-    def __init__(self, in_dim, hidden_layers=[128, 64], dropout_rate=0.3):
-        super(SepsisMLP, self).__init__()
-        layers = []
-        last_dim = in_dim
-
-        for h_dim in hidden_layers:
-            layers.append(nn.Linear(last_dim, h_dim))
-            layers.append(nn.BatchNorm1d(h_dim)) # Added Batch Norm for stability
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout_rate))
-            last_dim = h_dim
-
-        layers.append(nn.Linear(last_dim, 1)) # Outputting logits
-        self.network = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.network(x)
-
-# Initialize model
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-input_dim = X_train_t.shape[1]
-model = SepsisMLP(in_dim=input_dim).to(device)
-'''
-
-'''
-# Calculate weights for imbalanced classes
-num_neg = (y_train_t == 0).sum().item()
-num_pos = (y_train_t == 1).sum().item()
-pos_weight_val = torch.tensor([num_neg / num_pos]).to(device)
-
-print(f"Positive Class Weight: {pos_weight_val.item():.2f}")
-
-# Using pos_weight in BCE loss
-criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_val)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4) # Added L2 regularization
-'''
-
-'''
-epochs = 50
-model.train()
-
-for epoch in range(epochs):
-    epoch_loss = 0
-    for batch_X, batch_y in train_loader:
-        batch_X, batch_y = batch_X.to(device), batch_y.to(device).unsqueeze(1).float()
-
-        optimizer.zero_grad()
-        outputs = model(batch_X)
-        loss = criterion(np.squeeze(outputs), np.squeeze(batch_y))
-        loss.backward()
-        optimizer.step()
-
-        epoch_loss += loss.item()
-
-    if (epoch + 1) % 10 == 0:
-        print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss/len(train_loader):.4f}")
-'''
-
-'''
-from sklearn.metrics import classification_report, fbeta_score, average_precision_score, confusion_matrix
-import numpy as np
-
-model.eval()
-all_probs = []
-all_labels = []
-
-with torch.no_grad():
-    for batch_X, batch_y in test_loader:
-        batch_X = batch_X.to(device)
-        logits = model(batch_X)
-        probs = torch.sigmoid(logits)
-        all_probs.extend(probs.cpu().numpy())
-        all_labels.extend(batch_y.numpy())
-
-all_probs = np.array(all_probs).flatten()
-all_labels = np.array(all_labels).flatten()
-
-# Optimization: Adjust threshold for clinical sensitivity (e.g., 0.3 instead of 0.5)
-threshold = 0.3
-preds = (all_probs >= threshold).astype(int)
-
-print("--- Detailed Classification Report ---")
-print(classification_report(all_labels, preds, target_names=['No Sepsis', 'Sepsis']))
-
-f2 = fbeta_score(all_labels, preds, beta=2.0)
-auprc = average_precision_score(all_labels, all_probs)
-print(f"F2-Score (Recall-focused): {f2:.4f}")
-print(f"Area Under Precision-Recall Curve (AUPRC): {auprc:.4f}")
-'''
-
-'''
-import matplotlib.pyplot as plt
-from sklearn.metrics import precision_recall_curve, roc_curve, auc
-
-# Calculate Curves
-p, r, _ = precision_recall_curve(all_labels, all_probs)
-fpr, tpr, _ = roc_curve(all_labels, all_probs)
-
-plt.figure(figsize=(12, 5))
-
-# Plot PR Curve
-plt.subplot(1, 2, 1)
-plt.plot(r, p, color='teal', lw=2, label=f'AUPRC = {auprc:.2f}')
-plt.xlabel('Recall (Sensitivity)')
-plt.ylabel('Precision')
-plt.title('Precision-Recall Curve')
-plt.legend()
-plt.grid(alpha=0.3)
-
-# Plot ROC Curve
-plt.subplot(1, 2, 2)
-plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'AUROC = {auc(fpr, tpr):.2f}')
-plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('ROC Curve')
-plt.legend()
-plt.grid(alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-'''
-
-# Attempt 3 - with XGBoost
+"""# XG BOOSTED TREE"""
 
 import xgboost as xgb
 import numpy as np
@@ -2239,11 +1890,16 @@ print(f"Resampled Sepsis count: {np.sum(y_train_resampled)}")
 # Note: We remove scale_pos_weight because the data is now balanced 1:1
 xgb_balanced = xgb.XGBClassifier(
     objective='binary:logistic',
-    n_estimators=200,
-    learning_rate=0.05,
-    max_depth=5,
-    subsample=0.8,
-    colsample_bytree=0.8,
+    n_estimators=300,        # Increased, but we'll use a lower learning rate
+    learning_rate=0.02,      # Slow down learning to avoid memorizing noise
+    max_depth=4,             # Keep trees shallow to prevent overfitting 970 features
+
+    # --- NEW REGULARIZATION PARAMETERS ---
+    reg_alpha=1.0,           # L1 Regularization (forces unimportant feature weights to 0)
+    reg_lambda=2.0,          # L2 Regularization (prevents any one feature from dominating)
+    colsample_bytree=0.3,    # Only look at 30% of features for each tree (CRITICAL for 970 features)
+    subsample=0.8,           # Use 80% of rows for each tree
+
     eval_metric='aucpr',
     random_state=42
 )
@@ -2259,7 +1915,7 @@ y_probs = xgb_balanced.predict_proba(X_test_np)[:, 1]
 
 # Set a custom threshold for clinical sensitivity
 # Lowering this increases Recall (catching more sepsis cases)
-threshold = 0.0541
+threshold = 0.14
 y_preds = (y_probs >= threshold).astype(int)
 
 # Detailed Metrics
